@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -296,16 +296,15 @@ namespace ADBToolKit_1
         private void GenerateReport(bool asPdf)
         {
             string contacts = "", messages = "", calls = "", deviceInfo = "";
-
+            
             string contactsRaw = RunAdbCommand("shell content query --uri content://contacts/phones/ --projection display_name:number");
-            var entries = contactsRaw.Split(new[] { "Row " }, StringSplitOptions.RemoveEmptyEntries)
-                         .Select(entry => entry.Trim())
-                         .Where(entry => !string.IsNullOrEmpty(entry))
-                         .ToArray();
-
-            MessageBox.Show($"Total Contacts Found: {entries.Length}\n\nFirst 5 Contacts:\n{string.Join("\n", entries.Take(5))}");
-
-            contacts = $"Total Contacts: {entries.Length}\n";
+            var contactEntries = contactsRaw.Split(new[] { "Row " }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(entry => entry.Trim())
+                .Where(entry => !string.IsNullOrEmpty(entry))
+                .ToArray();
+            contacts = $"Total Contacts: {contactEntries.Length}\n\nFirst 5 Contacts:\n";
+            contacts += string.Join("\n", contactEntries.Take(5).Select(e =>
+                $"{ExtractField(e, "display_name=")} - {ExtractField(e, "number=")}"));
 
             string msgsRaw = RunAdbCommand("shell content query --uri content://sms/ --projection address:body:date");
             var msgEntries = msgsRaw.Split(new[] { "Row " }, StringSplitOptions.RemoveEmptyEntries);
@@ -318,53 +317,50 @@ namespace ADBToolKit_1
                 messages += $"- {sender}: {content}\n";
             }
 
-            string callsRaw = RunAdbCommand("shell content query --uri content://call_log/calls/ --projection number:type:duration:date");
-            var callEntries = callsRaw.Split(new[] { "Row " }, StringSplitOptions.RemoveEmptyEntries);
+            string callRaw = RunAdbCommand("shell content query --uri content://call_log/calls/ --projection number:type:duration");
+            var callEntries = callRaw.Split(new[] { "Row " }, StringSplitOptions.RemoveEmptyEntries);
             calls = $"Total Calls: {callEntries.Length}\n\nTop 5 Calls:\n";
-            var topCalls = callEntries.OrderByDescending(c => ExtractField(c, "date=")).Take(5);
-            foreach (var c in topCalls)
+            foreach (var c in callEntries.Take(5))
             {
                 string number = ExtractField(c, "number=");
-                string duration = ExtractField(c, "duration=");
                 string type = GetCallTypeName(ExtractField(c, "type="));
-                calls += $"- {number} ({type}, {duration}s)\n";
+                string duration = ExtractField(c, "duration=");
+                calls += $"- {number} [{type}] - {duration}s\n";
             }
 
-            string cpuRaw = RunAdbCommand("shell cat /proc/cpuinfo");
-            string memRaw = RunAdbCommand("shell cat /proc/meminfo");
+            string cpu = RunAdbCommand("shell cat /proc/cpuinfo");
+            string mem = RunAdbCommand("shell cat /proc/meminfo");
+            deviceInfo = "Device Info:\n\nCPU:\n" + cpu + "\nMemory:\n" + mem;
 
-            string cpuInfo = cpuRaw.Split('\n').FirstOrDefault(l => l.Contains("Hardware"))?.Trim() ?? "N/A";
-            string memInfo = memRaw.Split('\n').FirstOrDefault(l => l.Contains("MemTotal"))?.Trim() ?? "N/A";
-
-            deviceInfo = $"CPU Info:\n{cpuInfo}\n\nMemory Info:\n{memInfo}\n";
-
-            string filePath = "C:\\Users\\harin\\OneDrive\\Desktop\\ADBToolKit_1\\ADB_Report.pdf";
-            Document doc = new Document();
-            PdfWriter.GetInstance(doc, new FileStream(filePath, FileMode.Create));
-            doc.Open();
-
-            doc.Add(new Paragraph("ADB Data Extraction Report\n\n"));
-
-            doc.Add(new Paragraph("Contacts:\n"));
-            doc.Add(new Paragraph(contacts));
-            doc.Add(new Paragraph("\n"));
-
-            doc.Add(new Paragraph("Messages:\n"));
-            doc.Add(new Paragraph(messages));
-            doc.Add(new Paragraph("\n"));
-
-            doc.Add(new Paragraph("Calls:\n"));
-            doc.Add(new Paragraph(calls));
-            doc.Add(new Paragraph("\n"));
-
-            doc.Add(new Paragraph("Device Information:\n"));
-            doc.Add(new Paragraph(deviceInfo));
-
-            doc.Close();
-
-            MessageBox.Show($"Report saved as {filePath}");
+            string reportText = $"{contacts}\n\n{messages}\n\n{calls}\n\n{deviceInfo}";
+            SaveReportAsPdf(reportText);
+            
         }
 
+        private void SaveReportAsPdf(string reportText)
+        {
+            SaveFileDialog saveFileDialog = new SaveFileDialog
+            {
+                Filter = "PDF files (*.pdf)|*.pdf",
+                Title = "Save Report as PDF"
+            };
+
+            if (saveFileDialog.ShowDialog() == DialogResult.OK)
+            {
+                using (FileStream stream = new FileStream(saveFileDialog.FileName, FileMode.Create))
+                {
+                    Document pdfDoc = new Document(PageSize.A4, 25, 25, 30, 30);
+                    PdfWriter writer = PdfWriter.GetInstance(pdfDoc, stream);
+                    pdfDoc.Open();
+                    pdfDoc.Add(new Paragraph("ADB Data Extraction Report", FontFactory.GetFont("Arial", 16)));
+                    pdfDoc.Add(new Paragraph("\n"));
+                    pdfDoc.Add(new Paragraph(reportText, FontFactory.GetFont("Courier", 10)));
+                    pdfDoc.Close();
+                    writer.Close();
+                }
+                MessageBox.Show("PDF Report saved successfully.");
+            }
+        }
 
 
 
